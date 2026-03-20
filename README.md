@@ -5,22 +5,24 @@ Forward a local microphone to a remote Linux VM, so Claude Code's `/voice` works
 ## Architecture
 
 ```
-Client (Windows/Linux)                     Server (Linux)
-----------------------                     --------------
-
-Microphone                                 Claude /voice
-    |                                           ^
-    v                                           |
-claude-voice-send.py                       ALSA capture
-    |                                           ^
-    v                                           |
-ffmpeg (dshow/pulse)                       claude_mic.monitor
-    |                                           ^
-    v                                           |
-s16le 16kHz mono                           PipeWire null sink (claude_mic)
-    |                                           ^
-    v                                           |
-localhost:9257 -------- port forward -----> claude-voice-recv.py
+Client (Windows/Linux)      Server (Linux)
+----------------------      --------------
+Microphone                  Claude /voice
+    |                           ^
+    v                           |
+claude-voice-send.py        ALSA capture
+    |                           ^
+    v                           |
+ffmpeg (dshow/pulse)        claude_mic.monitor
+    |                           ^
+    v                           |
+s16le 16kHz mono           PipeWire null sink (claude_mic)
+    |                           ^
+    v                           |
+localhost:9257              claude-voice-recv.py
+    |                           ^
+    |                           |
+    -------> port forward -------
 ```
 
 ## Server Setup (Linux)
