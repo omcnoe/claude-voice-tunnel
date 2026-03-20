@@ -1,0 +1,8 @@
+{
+    "name": "claude-voice-tunnel",
+    "image": "mcr.microsoft.com/devcontainers/python:3.14-trixie",
+    "features": {
+        "ghcr.io/devcontainers/features/sshd:1": {},
+        "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {}
+    }
+}
