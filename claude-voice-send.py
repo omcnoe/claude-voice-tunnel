@@ -8,24 +8,38 @@ import socket
 import threading
 import signal
 import re
+import platform
+
+IS_WINDOWS = platform.system() == "Windows"
 
 HOST = "localhost"
 PORT = 9257
 CHECK_INTERVAL = 5
 
 def list_audio_devices():
-    """List available audio input devices via ffmpeg/dshow."""
-    proc = subprocess.run(
-        ["ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
-        stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
-    devices = []
-    for line in proc.stderr.splitlines():
-        if "Alternative name" in line:
-            continue
-        m = re.search(r'"(.+?)"\s+\(audio\)', line)
-        if m:
-            devices.append(m.group(1))
-    return devices
+    """List available audio input devices."""
+    if IS_WINDOWS:
+        proc = subprocess.run(
+            ["ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
+            stderr=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        devices = []
+        for line in proc.stderr.splitlines():
+            if "Alternative name" in line:
+                continue
+            m = re.search(r'"(.+?)"\s+\(audio\)', line)
+            if m:
+                devices.append(m.group(1))
+        return devices
+    else:
+        proc = subprocess.run(
+            ["pactl", "list", "short", "sources"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        devices = []
+        for line in proc.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) >= 2:
+                devices.append(parts[1])
+        return devices
 
 def pick_device():
     """Let user pick an audio device."""
@@ -49,16 +63,19 @@ def pick_device():
         print(f"Enter 1-{len(devices)}", flush=True)
 
 def ffmpeg_cmd(device):
-    return [
+    cmd = [
         "ffmpeg",
         "-hide_banner",
         "-probesize", "32",
         "-analyzeduration", "0",
         "-fflags", "nobuffer",
         "-flags", "low_delay",
-        "-f", "dshow",
-        "-rtbufsize", "1k",
-        "-i", f"audio={device}",
+    ]
+    if IS_WINDOWS:
+        cmd += ["-f", "dshow", "-rtbufsize", "1k", "-i", f"audio={device}"]
+    else:
+        cmd += ["-f", "pulse", "-i", device]
+    cmd += [
         "-af", "aresample=16000",
         "-f", "s16le",
         "-ar", "16000",
@@ -66,6 +83,7 @@ def ffmpeg_cmd(device):
         "-flush_packets", "1",
         f"tcp://{HOST}:{PORT}",
     ]
+    return cmd
 
 def watchdog(proc):
     """Kill ffmpeg if the server becomes unreachable."""

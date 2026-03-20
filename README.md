@@ -1,37 +1,26 @@
-# Claude voice tunnel - microphone forwarding for Claude Code voice dictation
+# Claude voice tunnel
 
 Forward a local microphone to a remote Linux VM, so Claude Code's `/voice` works over SSH.
 
 ## Architecture
 
 ```
-Windows
--------
-Microphone
-    |
-    v
-claude-voice-send.py
-    |
-    v
-ffmpeg (dshow)
-    |
-    v
-s16le 16kHz mono
-    |                            Linux
-    v                            -----
-localhost:5555 --port forward--> claude-voice-recv.py
-                                     |
-                                     v
-                                 pacat --playback
-                                     |
-                                     v
-                                 PipeWire null sink (claude_mic)
-                                     |
-                                     v
-                                 claude_mic.monitor
-                                     |
-                                     v
-                                 ALSA -> Claude /voice
+Client (Windows/Linux)                     Server (Linux)
+----------------------                     --------------
+
+Microphone                                 Claude /voice
+    |                                           ^
+    v                                           |
+claude-voice-send.py                       ALSA capture
+    |                                           ^
+    v                                           |
+ffmpeg (dshow/pulse)                       claude_mic.monitor
+    |                                           ^
+    v                                           |
+s16le 16kHz mono                           PipeWire null sink (claude_mic)
+    |                                           ^
+    v                                           |
+localhost:9257 -------- port forward -----> claude-voice-recv.py
 ```
 
 ## Server Setup (Linux)
@@ -92,6 +81,8 @@ EOF
 
 PipeWire's PulseAudio layer seems to have terrible latency in default config. This override drops it to 20ms.
 
+It's deliberate choice to use raw PCM instead of a codec like opus, to minimize latency.
+
 ### 5. Start PipeWire
 
 ```bash
@@ -133,17 +124,21 @@ python3 -u claude-voice-recv.py
 claude
 ```
 
-## Client Setup (Windows)
+## Client Setup (Linux/Windows)
 
-### Send audio
+`ffmpeg`, `python3`/`python.exe` binaries must be on `$PATH`.
 
-Run `claude-voice-send.py` (see file for source):
+On Linux, `pactl` (from `pulseaudio-utils`) is also needed.
+
+The script auto-detects the platform - uses DirectShow (`dshow`) on Windows and PulseAudio (`pulse`) source on Linux.
 
 ```bash
-python claude-voice-send.py
+python3 claude-voice-send.py
 ```
 
-TODO support non-Windows clients. Probably just need to swap dshow out in ffmpeg.
+```
+python.exe claude-voice-send.py
+```
 
 ### Port forwarding
 
