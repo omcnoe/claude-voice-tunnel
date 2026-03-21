@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 import socket, subprocess, os, threading, shutil, time
 
-os.environ['XDG_RUNTIME_DIR'] = '/run/user/1000'
-os.environ['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
+_uid = str(os.getuid())
+os.environ['XDG_RUNTIME_DIR'] = f'/run/user/{_uid}'
+os.environ['PULSE_SERVER'] = f'unix:/run/user/{_uid}/pulse/native'
 
 PORT = 9257
 lock = threading.Lock()
@@ -12,8 +13,8 @@ active = [None, None]  # [conn, pacat]
 def _is_running(name):
     """Check if a process is running by name."""
     try:
-        subprocess.run(['pgrep', '-x', name], stdout=subprocess.DEVNULL,
-                       stderr=subprocess.DEVNULL, check=True) # check=True checks for non-zero exit code
+        subprocess.run(['pgrep', '-x', '-u', _uid, name], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True)
         return True
     except subprocess.CalledProcessError:
         return False
