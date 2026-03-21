@@ -85,42 +85,17 @@ PipeWire's PulseAudio layer seems to have terrible latency in default config. Th
 
 It's deliberate choice to use raw PCM instead of a codec like opus, to minimize latency.
 
-### 5. Start PipeWire
+### 5. Start TCP audio receiver
 
-```bash
-pipewire &
-wireplumber &
-pipewire-pulse &
-```
-
-RTKit warnings about `MaxRealtimePriority` are harmless in containers - PipeWire falls back to non-realtime scheduling.
-
-### 6. Create null sink
-
-```bash
-pactl load-module module-null-sink \
-  sink_name=claude_mic \
-  sink_properties=device.description="Claude_Voice_Tunnel_Microphone" \
-  format=s16le rate=16000 channels=1
-
-pactl set-default-source claude_mic.monitor
-```
-
-This creates:
-- A sink (`claude_mic`) that accepts audio playback
-- A monitor source (`claude_mic.monitor`) that exposes played audio as a capture device
-
-The monitor source becomes the default capture device that Claude's native module reads from.
-
-### 7. Start TCP audio receiver
-
-Run `claude-voice-recv.py` (see file for source):
+`claude-voice-recv.py` auto-starts PipeWire, WirePlumber, and pipewire-pulse if they aren't already running, then creates the `claude_mic` null sink. Just run:
 
 ```bash
 python3 -u claude-voice-recv.py
 ```
 
-### 8. Launch Claude Code
+RTKit warnings about `MaxRealtimePriority` are harmless in containers - PipeWire falls back to non-realtime scheduling.
+
+### 6. Launch Claude Code in a new shell
 
 ```bash
 claude

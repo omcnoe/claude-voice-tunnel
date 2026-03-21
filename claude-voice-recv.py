@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import socket, subprocess, os, threading
+import socket, subprocess, os, threading, shutil, time
 
 os.environ['XDG_RUNTIME_DIR'] = '/run/user/1000'
 os.environ['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
@@ -7,6 +7,54 @@ os.environ['PULSE_SERVER'] = 'unix:/run/user/1000/pulse/native'
 PORT = 9257
 lock = threading.Lock()
 active = [None, None]  # [conn, pacat]
+
+
+def _is_running(name):
+    """Check if a process is running by name."""
+    try:
+        subprocess.run(['pgrep', '-x', name], stdout=subprocess.DEVNULL,
+                       stderr=subprocess.DEVNULL, check=True) # check=True checks for non-zero exit code
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def _start_daemon(name):
+    """Start a daemon if not already running."""
+    if _is_running(name):
+        print(f'{name} already running', flush=True)
+        return
+    print(f'Starting {name}...', flush=True)
+    subprocess.Popen([name], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+def _ensure_null_sink():
+    """Create the claude_mic null sink if it doesn't exist."""
+    result = subprocess.run(['pactl', 'list', 'sinks', 'short'],
+                            capture_output=True, text=True)
+    if 'claude_mic' in result.stdout:
+        print('claude_mic sink already exists', flush=True)
+        return
+    print('Creating claude_mic null sink...', flush=True)
+    subprocess.run([
+        'pactl', 'load-module', 'module-null-sink',
+        'sink_name=claude_mic',
+        'sink_properties=device.description="Claude_Voice_Tunnel_Microphone"',
+        'format=s16le', 'rate=16000', 'channels=1'
+    ], check=True)
+    subprocess.run(['pactl', 'set-default-source', 'claude_mic.monitor'], check=True)
+
+def ensure_audio():
+    """Start PipeWire daemons and create null sink if needed."""
+    for daemon in ['pipewire', 'wireplumber', 'pipewire-pulse']:
+        if not shutil.which(daemon):
+            print(f'WARNING: {daemon} not found on PATH', flush=True)
+            return
+    _start_daemon('pipewire')
+    time.sleep(0.3)
+    _start_daemon('wireplumber')
+    time.sleep(0.3)
+    _start_daemon('pipewire-pulse')
+    time.sleep(0.5)  # let pulse socket come up
+    _ensure_null_sink()
 
 def handle(conn, addr):
     print(f'Connection from {addr}', flush=True)
@@ -54,6 +102,8 @@ def handle(conn, addr):
     finally:
         pacat.terminate()
         conn.close()
+
+ensure_audio()
 
 srv = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
 srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
