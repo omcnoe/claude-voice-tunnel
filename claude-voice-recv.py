@@ -58,12 +58,13 @@ def ensure_audio():
 
 def handle(conn, addr):
     print(f'Connection from {addr}', flush=True)
-    # Wait for first data before taking over — proves this is a real sender
+    # Handshake: expect PING, reply PONG
     try:
-        first = conn.recv(2048)
-        if not first:
+        hello = conn.recv(16)
+        if hello != b'PING':
             conn.close()
             return
+        conn.sendall(b'PONG')
     except Exception:
         conn.close()
         return
@@ -75,7 +76,6 @@ def handle(conn, addr):
          '--latency-msec=1'],
         stdin=subprocess.PIPE)
 
-    # Now replace the old connection
     with lock:
         old_conn, old_pacat = active
         active[0] = conn
@@ -89,10 +89,8 @@ def handle(conn, addr):
             pass
 
     try:
-        pacat.stdin.write(first)
-        pacat.stdin.flush()
         while True:
-            data = conn.recv(2048)
+            data = conn.recv(512)
             if not data:
                 break
             pacat.stdin.write(data)
@@ -114,7 +112,7 @@ print(f'Listening on port {PORT}', flush=True)
 
 while True:
     conn, addr = srv.accept()
-    conn.settimeout(5)
+    conn.settimeout(2)
     conn.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 4096)
     conn.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
     threading.Thread(target=handle, args=(conn, addr), daemon=True).start()

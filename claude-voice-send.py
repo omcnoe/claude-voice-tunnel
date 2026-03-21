@@ -5,7 +5,6 @@ import subprocess
 import sys
 import time
 import socket
-import threading
 import signal
 import re
 import platform
@@ -14,10 +13,9 @@ IS_WINDOWS = platform.system() == "Windows"
 
 HOST = "localhost"
 PORT = 9257
-CHECK_INTERVAL = 5
 
 def list_audio_devices():
-    """List available audio input devices."""
+    """List available audio input devices. Exits if none found."""
     if IS_WINDOWS:
         proc = subprocess.run(
             ["ffmpeg", "-list_devices", "true", "-f", "dshow", "-i", "dummy"],
@@ -29,7 +27,6 @@ def list_audio_devices():
             m = re.search(r'"(.+?)"\s+\(audio\)', line)
             if m:
                 devices.append(m.group(1))
-        return devices
     else:
         proc = subprocess.run(
             ["pactl", "list", "short", "sources"],
@@ -39,24 +36,31 @@ def list_audio_devices():
             parts = line.split("\t")
             if len(parts) >= 2:
                 devices.append(parts[1])
-        return devices
-
-def pick_device():
-    """Let user pick an audio device."""
-    devices = list_audio_devices()
     if not devices:
         print("No audio devices found.", flush=True)
         sys.exit(1)
+    return devices
+
+def print_devices(devices):
+    """Print numbered device list."""
+    for i, d in enumerate(devices):
+        print(f"  {i + 1}. {d}", flush=True)
+
+def pick_device(choice=None):
+    """Let user pick an audio device, or select by number."""
+    devices = list_audio_devices()
+    if choice is not None and 1 <= choice <= len(devices):
+        print(f"Using: {devices[choice - 1]}", flush=True)
+        return devices[choice - 1]
     if len(devices) == 1:
         print(f"Using: {devices[0]}", flush=True)
         return devices[0]
-    print("Audio devices:", flush=True)
-    for i, d in enumerate(devices):
-        print(f"  {i + 1}. {d}", flush=True)
+    print_devices(devices)
     while True:
         try:
             choice = int(input("Select device: "))
             if 1 <= choice <= len(devices):
+                print(f"Using: {devices[choice - 1]}", flush=True)
                 return devices[choice - 1]
         except (ValueError, EOFError):
             pass
@@ -81,29 +85,17 @@ def ffmpeg_cmd(device):
         "-ar", "16000",
         "-ac", "1",
         "-flush_packets", "1",
-        f"tcp://{HOST}:{PORT}",
+        "pipe:1",
     ]
     return cmd
 
-def watchdog(proc):
-    """Kill ffmpeg if the server becomes unreachable."""
-    while proc.poll() is None:
-        time.sleep(CHECK_INTERVAL)
-        try:
-            s = socket.create_connection((HOST, PORT), timeout=2)
-            s.close()
-        except OSError:
-            print("Lost connection, restarting ffmpeg", flush=True)
-            proc.kill()
-            return
-
 def main():
+    args = [a for a in sys.argv[1:] if not a.startswith("-")]
     if "--list" in sys.argv:
-        for d in list_audio_devices():
-            print(d)
+        print_devices(list_audio_devices())
         return
 
-    device = pick_device()
+    device = pick_device(int(args[0]) if args else None)
     proc = None
 
     def shutdown(sig, frame):
@@ -115,14 +107,38 @@ def main():
     signal.signal(signal.SIGINT, shutdown)
 
     while True:
-        print(f"Starting ffmpeg -> {HOST}:{PORT}", flush=True)
+        # Connect to server first
         try:
-            proc = subprocess.Popen(ffmpeg_cmd(device))
-            threading.Thread(target=watchdog, args=(proc,), daemon=True).start()
+            sock = socket.create_connection((HOST, PORT), timeout=2)
+            sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            sock.settimeout(2)
+            sock.sendall(b'PING')
+            if sock.recv(16) != b'PONG':
+                raise OSError("Server handshake failed")
+        except OSError as e:
+            print(f"Cannot connect to {HOST}:{PORT}: {e}", flush=True)
+            time.sleep(1)
+            continue
+
+        print(f"Connected, starting ffmpeg", flush=True)
+        try:
+            proc = subprocess.Popen(ffmpeg_cmd(device),
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.DEVNULL)
+            while True:
+                data = proc.stdout.read(512)
+                if not data:
+                    break
+                sock.sendall(data)
+        except (OSError, BrokenPipeError, socket.timeout) as e:
+            print(f"Connection lost: {e}", flush=True)
+        finally:
+            proc.kill()
             proc.wait()
-            print(f"ffmpeg exited with code {proc.returncode}", flush=True)
-        except Exception as e:
-            print(f"Error: {e}", flush=True)
+            try:
+                sock.close()
+            except Exception:
+                pass
         time.sleep(1)
 
 if __name__ == "__main__":
