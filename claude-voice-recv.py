@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import socket, subprocess, os, threading, shutil, time
+import sys, socket, subprocess, os, threading, shutil, time
 
 _uid = str(os.getuid())
 os.environ['XDG_RUNTIME_DIR'] = f'/run/user/{_uid}'
@@ -47,8 +47,7 @@ def ensure_audio():
     """Start PipeWire daemons and create null sink if needed."""
     for daemon in ['pipewire', 'wireplumber', 'pipewire-pulse']:
         if not shutil.which(daemon):
-            print(f'WARNING: {daemon} not found on PATH', flush=True)
-            return
+            sys.exit(f'ERROR: {daemon} not found on PATH')
     _start_daemon('pipewire')
     time.sleep(0.3)
     _start_daemon('wireplumber')
